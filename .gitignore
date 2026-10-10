@@ -1,0 +1,25 @@
+
+# Secrets and authentication
+.env
+credentials.json
+token.json
+token.pickle
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Personal data and generated results
+results/
+resumes/
+test_resumes/
+test_resumes*/
+downloaded_attachments/
+processed_ids.json
+candidates.json
+
+# macOS
+.DS_Store
+
