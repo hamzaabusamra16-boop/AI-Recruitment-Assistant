@@ -11,6 +11,10 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
+import time
+import random
+from googleapiclient.errors import HttpError
+
 def create_message(sender ,to,subject,messge_text ):
     message= MIMEText(messge_text)
     message["from"]= sender
@@ -20,7 +24,7 @@ def create_message(sender ,to,subject,messge_text ):
     return {
         "raw": raw_message.decode('utf-8')
     }
-def create_draft(service, user_id, message_body):
+def create_drafts(service, user_id, message_body):
     try:
         message = {"message" :message_body}
         drafts=service.users().derfts().create(userId=user_id,body=message).execute()
@@ -95,29 +99,48 @@ def get_mime_message(service, user_id, msg_id):
     except Exception as error:
         print('An error occurred: %s' % error)
         return None
+
 def get_attachments(service, user_id, msg_id, store_dir):
+    os.makedirs(store_dir, exist_ok=True)
+
+    def execute_with_retry(request, retries=4):
+        for attempt in range(retries):
+            try:
+                return request.execute()
+            except HttpError as error:
+                if error.resp.status not in (403, 429, 500, 503):
+                    raise
+
+                if attempt == retries - 1:
+                    raise
+
+                delay = (2 ** attempt) + random.random()
+                print(f"Gmail API limit/server error. Retrying in {delay:.1f}s...")
+                time.sleep(delay)
+
     try:
-        os.makedirs(store_dir, exist_ok=True)
-        message = service.users().messages().get(
-            userId=user_id,
-            id=msg_id,
-            format="full"
-        ).execute()
+        message = execute_with_retry(
+            service.users().messages().get(
+                userId=user_id,
+                id=msg_id,
+                format="full",
+            )
+        )
+
         def save_parts(parts):
             for part in parts:
                 filename = part.get("filename")
                 body = part.get("body", {})
                 attachment_id = body.get("attachmentId")
-                print("Filename:", repr(filename))
-                print("Attachment ID:", repr(attachment_id))
-                print("MIME type:", part.get("mimeType"))
 
                 if filename and attachment_id:
-                    attachment = service.users().messages().attachments().get(
-                        userId=user_id,
-                        messageId=msg_id,
-                        id=attachment_id
-                    ).execute()
+                    attachment = execute_with_retry(
+                        service.users().messages().attachments().get(
+                            userId=user_id,
+                            messageId=msg_id,
+                            id=attachment_id,
+                        )
+                    )
 
                     file_data = base64.urlsafe_b64decode(
                         attachment["data"]
@@ -126,18 +149,20 @@ def get_attachments(service, user_id, msg_id, store_dir):
                     safe_filename = os.path.basename(filename)
                     path = os.path.join(store_dir, safe_filename)
 
-                    with open(path, "wb") as f:
-                        f.write(file_data)
+                    with open(path, "wb") as file:
+                        file.write(file_data)
 
                     print(f"Saved attachment: {safe_filename}")
+                    time.sleep(0.2)
 
                 save_parts(part.get("parts", []))
+
         payload = message.get("payload", {})
         save_parts(payload.get("parts", []))
-    except Exception as error:
-        print(f"An error occurred: {error}")
-        return None
 
+    except Exception as error:
+        print(f"Failed to download attachments for {msg_id}: {error}")
+        return None
 
 
 def process_student_emails(folder_path):

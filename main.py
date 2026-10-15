@@ -5,18 +5,21 @@ from pathlib import Path
 from pypdf import PdfReader
 from docx import Document
 
-from files import get_messages, get_attachments
-from gmail import get_gmail_service
-from AI import extract_candidate_info
-
-
+from gmail_and_files.files import get_messages, get_attachments
+from gmail_and_files.gmail import get_gmail_service
+from AI.AI import screen_candidate
+import hashlib
 BASE_DIR = Path(__file__).resolve().parent
 RESUMES_DIR = BASE_DIR / "resumes"
 RESULTS_DIR = BASE_DIR / "results"
 
-RESULTS_FILE = RESULTS_DIR / "candidates.json"
-PROCESSED_FILE = BASE_DIR / "processed_ids.json"
 
+ENV_DIR = BASE_DIR / ".env_"
+ENV_DIR.mkdir(parents=True, exist_ok=True)
+
+RESULTS_FILE = ENV_DIR / "candidates.json"
+PROCESSED_FILE = ENV_DIR / "processed_ids.json"
+JOB_DESCRIPTION_FILE = BASE_DIR / "sample_data" / "job_description.txt"
 RESUMES_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -37,6 +40,16 @@ def save_json(file_path, data):
     with open(file_path, "w", encoding="utf-8") as file:
         json.dump(data, file, ensure_ascii=False, indent=2)
 
+
+def calculate_file_hash(file_path):
+    """Return the SHA-256 hash of a file's contents."""
+    sha256 = hashlib.sha256()
+
+    with open(file_path, "rb") as file:
+        for chunk in iter(lambda: file.read(8192), b""):
+            sha256.update(chunk)
+
+    return sha256.hexdigest()
 
 def read_resume_text(file_path):
     """Extract text from a supported resume file."""
@@ -65,11 +78,28 @@ def main():
     all_candidates = load_json(RESULTS_FILE, [])
     processed_ids = set(load_json(PROCESSED_FILE, []))
 
-    # Avoid adding the same resume twice.
+    if not JOB_DESCRIPTION_FILE.exists():
+        raise FileNotFoundError(
+            f"Job description file not found: {JOB_DESCRIPTION_FILE}"
+        )
+
+    job_description = JOB_DESCRIPTION_FILE.read_text(
+        encoding="utf-8"
+    ).strip()
+
+    if not job_description:
+        raise ValueError("The job description file is empty.")
+
     existing_candidates = {
         (item["message_id"], item["resume_file"])
         for item in all_candidates
         if "message_id" in item and "resume_file" in item
+    }
+
+    existing_hashes = {
+        item["file_hash"]
+        for item in all_candidates
+        if item.get("file_hash")
     }
 
     print("Connecting to Gmail...")
@@ -134,12 +164,17 @@ def main():
             message_succeeded = True
 
             for resume_path in resume_files:
+
                 candidate_key = (message_id, resume_path.name)
+                file_hash = calculate_file_hash(resume_path)
 
                 if candidate_key in existing_candidates:
                     print(f"Already extracted: {resume_path.name}")
                     continue
 
+                if file_hash in existing_hashes:
+                    print(f"Duplicate resume content: {resume_path.name}")
+                    continue
                 print(f"Reading resume: {resume_path.name}")
 
                 try:
@@ -150,23 +185,31 @@ def main():
                         message_succeeded = False
                         continue
 
-                    candidate = extract_candidate_info(resume_text)
+
+                    screening_result = screen_candidate(
+                        resume_text,
+                        job_description
+                    )
 
                     all_candidates.append({
                         "message_id": message_id,
                         "resume_file": resume_path.name,
-                        "candidate": candidate,
+                        "candidate": screening_result["candidate"],
+                        "job_requirements": screening_result["job_requirements"],
+                        "comparison": screening_result["comparison"],
+                        "semantic_similarity": screening_result["semantic_similarity"],
+                        "must_have": screening_result["must_have"],
+                        "file_hash": file_hash,
                     })
 
                     existing_candidates.add(candidate_key)
+                    existing_hashes.add(file_hash)
                     new_candidates += 1
-
-                    # Save each successful candidate immediately.
                     save_json(RESULTS_FILE, all_candidates)
 
                     print(
-                        "Candidate extracted:",
-                        candidate.get("name") or "Name not found",
+                        "Candidate screened:",
+                        screening_result["candidate"].get("name") or "Name not found",
                     )
 
                 except Exception as error:
@@ -175,8 +218,6 @@ def main():
                     )
                     message_succeeded = False
 
-            # Mark the email as processed only if its supported
-            # resume files were handled successfully.
             if message_succeeded:
                 processed_ids.add(message_id)
                 save_json(PROCESSED_FILE, sorted(processed_ids))

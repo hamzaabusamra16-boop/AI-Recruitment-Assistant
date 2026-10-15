@@ -14,9 +14,11 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 
 # Keep authentication files beside this Python file.
 BASE_DIR = Path(__file__).resolve().parent
-TOKEN_FILE = BASE_DIR / "token.json"
-CREDENTIALS_FILE = BASE_DIR / "credentials.json"
+ENV_DIR = BASE_DIR.parent / ".env_"
+ENV_DIR.mkdir(parents=True, exist_ok=True)
 
+TOKEN_FILE = ENV_DIR / "token.json"
+CREDENTIALS_FILE = ENV_DIR / "credentials.json"
 
 def get_gmail_service():
     """Authenticate with Google and return a Gmail API service."""

@@ -1,8 +1,0 @@
-Job Title: Junior Python Developer
-
-Requirements:
-- Must have Python programming skills.
-- Must have a Bachelor's degree in Computer Science or a related field.
-- Must speak English.
-- SQL knowledge is preferred.
-- Experience with FastAPI is a plus.

@@ -15,6 +15,7 @@ venv/
 results/
 resumes/
 test_resumes/
+sample_data/
 test_resumes*/
 downloaded_attachments/
 processed_ids.json
@@ -23,3 +24,16 @@ candidates.json
 # macOS
 .DS_Store
 
+# Secrets and authentication
+.env
+.env_/
+.env*/
+credentials.json
+token.json
+token.pickle
+
+# Python environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
